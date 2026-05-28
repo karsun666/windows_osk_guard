@@ -52,6 +52,8 @@ struct ITipInvocation : IUnknown {
 static bool g_touch_to_mouse_enabled = true;
 static bool g_last_input_was_touch = false;
 static HWND g_main_window_handle = nullptr;
+static POINT g_start_pt = { 0, 0 };
+static bool g_is_dragging = false;
 
 static bool IsWindowReallyVisible(HWND hwnd) {
   if (hwnd == nullptr) return false;
@@ -154,6 +156,8 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
           LPARAM mouseLparam = MAKELPARAM(pt.x, pt.y);
 
           if (pInputs[0].dwFlags & TOUCHEVENTF_DOWN) {
+            g_start_pt = pt;
+            g_is_dragging = false;
             mouseMsg = WM_LBUTTONDOWN;
             mouseWparam = MK_LBUTTON;
             SetCapture(hWnd);
@@ -162,8 +166,18 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
             mouseWparam = 0;
             ReleaseCapture();
           } else if (pInputs[0].dwFlags & TOUCHEVENTF_MOVE) {
-            mouseMsg = WM_MOUSEMOVE;
-            mouseWparam = MK_LBUTTON;
+            if (g_is_dragging) {
+              mouseMsg = WM_MOUSEMOVE;
+              mouseWparam = MK_LBUTTON;
+            } else {
+              int dx = pt.x - g_start_pt.x;
+              int dy = pt.y - g_start_pt.y;
+              if (dx * dx + dy * dy >= 144) { // 12 pixels slop
+                g_is_dragging = true;
+                mouseMsg = WM_MOUSEMOVE;
+                mouseWparam = MK_LBUTTON;
+              }
+            }
           }
 
           if (mouseMsg != 0) {
@@ -194,6 +208,8 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
           LPARAM mouseLparam = MAKELPARAM(pt.x, pt.y);
 
           if (uMsg == WM_POINTERDOWN) {
+            g_start_pt = pt;
+            g_is_dragging = false;
             mouseMsg = WM_LBUTTONDOWN;
             mouseWparam = MK_LBUTTON;
             SetCapture(hWnd);
@@ -202,11 +218,26 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
             mouseWparam = 0;
             ReleaseCapture();
           } else if (uMsg == WM_POINTERUPDATE) {
-            mouseMsg = WM_MOUSEMOVE;
-            POINTER_INFO pointerInfo{};
-            if (GetPointerInfo(pointerId, &pointerInfo)) {
-              if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
-                mouseWparam = MK_LBUTTON;
+            if (g_is_dragging) {
+              mouseMsg = WM_MOUSEMOVE;
+              POINTER_INFO pointerInfo{};
+              if (GetPointerInfo(pointerId, &pointerInfo)) {
+                if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
+                  mouseWparam = MK_LBUTTON;
+                }
+              }
+            } else {
+              int dx = pt.x - g_start_pt.x;
+              int dy = pt.y - g_start_pt.y;
+              if (dx * dx + dy * dy >= 144) { // 12 pixels slop
+                g_is_dragging = true;
+                mouseMsg = WM_MOUSEMOVE;
+                POINTER_INFO pointerInfo{};
+                if (GetPointerInfo(pointerId, &pointerInfo)) {
+                  if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
+                    mouseWparam = MK_LBUTTON;
+                  }
+                }
               }
             }
           }
