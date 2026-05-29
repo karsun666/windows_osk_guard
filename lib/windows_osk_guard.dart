@@ -15,6 +15,9 @@ typedef SetTouchToMouseEnabledDart = void Function(bool enabled);
 typedef GetLastInputWasTouchNative = Bool Function();
 typedef GetLastInputWasTouchDart = bool Function();
 
+typedef IsTouchKeyboardVisibleNative = Bool Function();
+typedef IsTouchKeyboardVisibleDart = bool Function();
+
 /// Stub class to satisfy default Flutter project template files and tests.
 class WindowsOskGuard {
   Future<String?> getPlatformVersion() async {
@@ -28,6 +31,7 @@ class TouchBridge {
   static SetTouchKeyboardVisibleDart? _setTouchKeyboardVisible;
   static SetTouchToMouseEnabledDart? _setTouchToMouseEnabled;
   static GetLastInputWasTouchDart? _getLastInputWasTouch;
+  static IsTouchKeyboardVisibleDart? _isTouchKeyboardVisible;
 
   static void init() {
     if (!Platform.isWindows) return;
@@ -45,6 +49,10 @@ class TouchBridge {
       _getLastInputWasTouch = _dylib!
           .lookupFunction<GetLastInputWasTouchNative, GetLastInputWasTouchDart>(
               'GetLastInputWasTouch');
+
+      _isTouchKeyboardVisible = _dylib!
+          .lookupFunction<IsTouchKeyboardVisibleNative, IsTouchKeyboardVisibleDart>(
+              'IsTouchKeyboardVisible');
               
       debugPrint('[TouchBridge] Successfully bound native touch bridge DLL functions.');
       
@@ -90,6 +98,17 @@ class TouchBridge {
     }
     return false;
   }
+
+  static bool isKeyboardVisible() {
+    if (_isTouchKeyboardVisible != null) {
+      try {
+        return _isTouchKeyboardVisible!();
+      } catch (e) {
+        debugPrint('[TouchBridge] Error calling IsTouchKeyboardVisible: $e');
+      }
+    }
+    return false;
+  }
 }
 
 /// Real-time monitor for the Windows touch keyboard window visibility.
@@ -120,13 +139,15 @@ class OskWindowMonitor {
   }
 
   static bool isKeyboardWindowVisible() {
-    return false;
+    return TouchBridge.isKeyboardVisible();
   }
 
-  static void hideKeyboard() {}
+  static void hideKeyboard() {
+    TouchBridge.setKeyboardVisible(false);
+  }
 }
 
-/// A global widget that intercept touch events and controls the Windows virtual keyboard.
+/// A global widget that intercepts touch events and controls the Windows virtual keyboard.
 class GlobalTouchKeyboardGuard extends StatefulWidget {
   const GlobalTouchKeyboardGuard({super.key, required this.child});
   final Widget child;
@@ -139,13 +160,24 @@ class GlobalTouchKeyboardGuard extends StatefulWidget {
 }
 
 class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
-  final OskWindowMonitor _oskMonitor = OskWindowMonitor(intervalMs: 80);
+  late final OskWindowMonitor _oskMonitor;
   bool _lastTapWasTextField = false;
+  DateTime _lastTextFieldTapTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
     TouchBridge.init();
+    _oskMonitor = OskWindowMonitor(
+      intervalMs: 80,
+      onAppeared: () {
+        final timeSinceTap = DateTime.now().difference(_lastTextFieldTapTime);
+        if (timeSinceTap.inMilliseconds > 1500 && Platform.isWindows) {
+          debugPrint('[OSK Guard] Suppressing unexpected keyboard window (time since tap: ${timeSinceTap.inMilliseconds}ms)');
+          TouchBridge.setKeyboardVisible(false);
+        }
+      },
+    );
     _oskMonitor.start();
   }
 
@@ -234,12 +266,14 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
       if (Platform.isWindows) {
         final isTouch = TouchBridge.getLastInputWasTouch();
         if (isTouch) {
+          _lastTextFieldTapTime = DateTime.now();
           _lastTapWasTextField = true;
           TouchBridge.setKeyboardVisible(true);
         } else {
           _lastTapWasTextField = false;
         }
       } else {
+        _lastTextFieldTapTime = DateTime.now();
         _lastTapWasTextField = true;
       }
       return;

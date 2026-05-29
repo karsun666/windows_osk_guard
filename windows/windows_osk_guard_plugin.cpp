@@ -54,6 +54,7 @@ static bool g_last_input_was_touch = false;
 static HWND g_main_window_handle = nullptr;
 static POINT g_start_pt = { 0, 0 };
 static bool g_is_dragging = false;
+static DWORD g_down_time = 0;
 
 static bool IsWindowReallyVisible(HWND hwnd) {
   if (hwnd == nullptr) return false;
@@ -126,6 +127,10 @@ extern "C" __declspec(dllexport) bool GetLastInputWasTouch() {
   return g_last_input_was_touch;
 }
 
+extern "C" __declspec(dllexport) bool IsTouchKeyboardVisible() {
+  return IsKeyboardVisible();
+}
+
 // Subclass procedure to intercept touch messages at the child window level.
 // This translates OS touch inputs to standard mouse inputs and suppresses the original
 // touch events, preventing Windows from triggering the touch keyboard automatically.
@@ -148,6 +153,14 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
       if (cInputs > 0) {
         TOUCHINPUT* pInputs = new TOUCHINPUT[cInputs];
         if (GetTouchInputInfo(hTouchInput, cInputs, pInputs, sizeof(TOUCHINPUT))) {
+          // If there is more than 1 touch contact, let it pass through to the default windows proc
+          // so that multi-touch gestures (like pinch-to-zoom) are preserved!
+          if (cInputs > 1) {
+            CloseTouchInputHandle(hTouchInput);
+            delete[] pInputs;
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+          }
+
           POINT pt = { pInputs[0].x / 100, pInputs[0].y / 100 };
           ScreenToClient(hWnd, &pt);
 
@@ -157,11 +170,23 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
 
           if (pInputs[0].dwFlags & TOUCHEVENTF_DOWN) {
             g_start_pt = pt;
+            g_down_time = GetTickCount();
             g_is_dragging = false;
             mouseMsg = WM_LBUTTONDOWN;
             mouseWparam = MK_LBUTTON;
             SetCapture(hWnd);
           } else if (pInputs[0].dwFlags & TOUCHEVENTF_UP) {
+            DWORD duration = GetTickCount() - g_down_time;
+            int dx = pt.x - g_start_pt.x;
+            int dy = pt.y - g_start_pt.y;
+            if (duration >= 500 && (dx * dx + dy * dy < 144)) {
+              DefSubclassProc(hWnd, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(pt.x, pt.y));
+              DefSubclassProc(hWnd, WM_RBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
+              ReleaseCapture();
+              CloseTouchInputHandle(hTouchInput);
+              delete[] pInputs;
+              return 0;
+            }
             mouseMsg = WM_LBUTTONUP;
             mouseWparam = 0;
             ReleaseCapture();
@@ -197,6 +222,14 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
       POINTER_INPUT_TYPE pointerType = PT_POINTER;
       if (GetPointerType(pointerId, &pointerType)) {
         if (pointerType == PT_TOUCH || pointerType == PT_PEN) {
+          POINTER_INFO pointerInfo{};
+          if (GetPointerInfo(pointerId, &pointerInfo)) {
+            // Let non-primary pointers pass through to preserve multi-touch pinch/zoom
+            if (!(pointerInfo.pointerFlags & POINTER_FLAG_PRIMARY)) {
+              return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            }
+          }
+
           if (uMsg == WM_POINTERDOWN) {
             g_last_input_was_touch = true;
           }
@@ -209,11 +242,21 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
 
           if (uMsg == WM_POINTERDOWN) {
             g_start_pt = pt;
+            g_down_time = GetTickCount();
             g_is_dragging = false;
             mouseMsg = WM_LBUTTONDOWN;
             mouseWparam = MK_LBUTTON;
             SetCapture(hWnd);
           } else if (uMsg == WM_POINTERUP) {
+            DWORD duration = GetTickCount() - g_down_time;
+            int dx = pt.x - g_start_pt.x;
+            int dy = pt.y - g_start_pt.y;
+            if (duration >= 500 && (dx * dx + dy * dy < 144)) {
+              DefSubclassProc(hWnd, WM_RBUTTONDOWN, MK_RBUTTON, MAKELPARAM(pt.x, pt.y));
+              DefSubclassProc(hWnd, WM_RBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
+              ReleaseCapture();
+              return 0;
+            }
             mouseMsg = WM_LBUTTONUP;
             mouseWparam = 0;
             ReleaseCapture();
