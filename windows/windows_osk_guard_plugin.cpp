@@ -263,11 +263,8 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
           } else if (uMsg == WM_POINTERUPDATE) {
             if (g_is_dragging) {
               mouseMsg = WM_MOUSEMOVE;
-              POINTER_INFO pointerInfo{};
-              if (GetPointerInfo(pointerId, &pointerInfo)) {
-                if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
-                  mouseWparam = MK_LBUTTON;
-                }
+              if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
+                mouseWparam = MK_LBUTTON;
               }
             } else {
               int dx = pt.x - g_start_pt.x;
@@ -275,11 +272,8 @@ static LRESULT CALLBACK FlutterViewSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
               if (dx * dx + dy * dy >= 144) { // 12 pixels slop
                 g_is_dragging = true;
                 mouseMsg = WM_MOUSEMOVE;
-                POINTER_INFO pointerInfo{};
-                if (GetPointerInfo(pointerId, &pointerInfo)) {
-                  if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
-                    mouseWparam = MK_LBUTTON;
-                  }
+                if (pointerInfo.pointerFlags & POINTER_FLAG_DOWN) {
+                  mouseWparam = MK_LBUTTON;
                 }
               }
             }
