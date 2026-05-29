@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:windows_osk_guard/windows_osk_guard_platform_interface.dart';
 
 typedef SetTouchKeyboardVisibleNative = Void Function(Bool visible);
 typedef SetTouchKeyboardVisibleDart = void Function(bool visible);
@@ -20,8 +21,8 @@ typedef IsTouchKeyboardVisibleDart = bool Function();
 
 /// Stub class to satisfy default Flutter project template files and tests.
 class WindowsOskGuard {
-  Future<String?> getPlatformVersion() async {
-    return 'Windows';
+  Future<String?> getPlatformVersion() {
+    return WindowsOskGuardPlatform.instance.getPlatformVersion();
   }
 }
 
