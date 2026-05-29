@@ -57,7 +57,8 @@ class TouchBridge {
               
       debugPrint('[TouchBridge] Successfully bound native touch bridge DLL functions.');
       
-      setToMouseEnabled(true);
+      // Disable touch-to-mouse translation by default to preserve native touch gestures
+      setToMouseEnabled(false);
     } catch (e) {
       debugPrint('[TouchBridge] Failed to load native touch bridge functions: $e');
     }
