@@ -720,12 +720,14 @@ class _TestDashboardPageState extends State<TestDashboardPage> {
                                   children: [
                                     Text('1. Test Controls', style: Theme.of(context).textTheme.titleMedium),
                                     const SizedBox(height: 10),
-                                    TextField(
-                                      focusNode: _textFieldFocusNode,
-                                      decoration: const InputDecoration(
-                                        border: OutlineInputBorder(),
-                                        labelText: 'Enter text here',
-                                        hintText: 'Tap to trigger OSK',
+                                    OskTextField(
+                                      child: TextField(
+                                        focusNode: _textFieldFocusNode,
+                                        decoration: const InputDecoration(
+                                          border: OutlineInputBorder(),
+                                          labelText: 'Enter text here',
+                                          hintText: 'Tap to trigger OSK',
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(height: 10),
@@ -754,7 +756,7 @@ class _TestDashboardPageState extends State<TestDashboardPage> {
                                       spacing: 8,
                                       runSpacing: 8,
                                       children: [
-                                        ElevatedButton(
+                                        OskActionButton(
                                           onPressed: () {
                                             _log('BUTTON PRESS: Action Button clicked');
                                           },
@@ -767,7 +769,7 @@ class _TestDashboardPageState extends State<TestDashboardPage> {
                                           },
                                           child: const Text('Force Unfocus'),
                                         ),
-                                        ElevatedButton(
+                                        OskActionButton(
                                           onPressed: () {
                                             _log('BUTTON PRESS: Navigate to Page 2');
                                             Navigator.push(

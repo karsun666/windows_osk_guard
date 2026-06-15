@@ -139,6 +139,10 @@ class TouchBridge {
   }
 
   static void setKeyboardVisible(bool visible) {
+    if (visible && GlobalTouchKeyboardGuard.isOskLocked) {
+      debugPrint('[TouchBridge] OSK show request blocked due to active navigation/action lock.');
+      return;
+    }
     if (_setTouchKeyboardVisible != null) {
       try {
         _setTouchKeyboardVisible!(visible);
@@ -280,6 +284,21 @@ class GlobalTouchKeyboardGuard extends StatefulWidget {
   static final GlobalKey<GlobalTouchKeyboardGuardState> globalKey =
       GlobalKey<GlobalTouchKeyboardGuardState>();
 
+  static bool _suppressForNavigation = false;
+  static bool _suppressForAction = false;
+
+  static bool get isOskLocked => _suppressForNavigation || _suppressForAction;
+
+  static void setNavigationLock(bool locked) {
+    _suppressForNavigation = locked;
+    debugPrint('[OSK Guard] Navigation lock set to: $locked');
+  }
+
+  static void setActionButtonLock(bool locked) {
+    _suppressForAction = locked;
+    debugPrint('[OSK Guard] Action button lock set to: $locked');
+  }
+
   @override
   State<GlobalTouchKeyboardGuard> createState() => GlobalTouchKeyboardGuardState();
 }
@@ -302,9 +321,9 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
         if (Platform.isWindows) {
           final primary = FocusManager.instance.primaryFocus;
           final isTextFocused = primary != null && _focusIsEditable(primary);
-          debugPrint('⌨️ [OSK MONITOR] Keyboard appeared. Focus is in Text Field: $isTextFocused');
-          if (!isTextFocused) {
-            debugPrint('👉 [OSK MONITOR] Suppressing unexpected keyboard window appearance because focus is not in editable field.');
+          debugPrint('⌨️ [OSK MONITOR] Keyboard appeared. Focus is in Text Field: $isTextFocused | Lock: ${GlobalTouchKeyboardGuard.isOskLocked}');
+          if (!isTextFocused || GlobalTouchKeyboardGuard.isOskLocked) {
+            debugPrint('👉 [OSK MONITOR] Suppressing unexpected keyboard window appearance because focus is not in editable field or lock is active.');
             TouchBridge.setKeyboardVisible(false);
           }
         }
@@ -384,8 +403,12 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
           final dynamic creator = (target as dynamic).debugCreator;
           if (creator != null) {
             final dynamic element = creator.element;
-            if (element != null) {
+            if (element != null && element is Element) {
               types.add(element.widget.runtimeType.toString());
+              element.visitAncestorElements((parent) {
+                types.add(parent.widget.runtimeType.toString());
+                return true;
+              });
             }
           }
         } catch (_) {}
@@ -397,18 +420,23 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
   void _onPointerDown(BuildContext context, PointerDownEvent event) {
     final isTextFieldTapped = _hitTestIncludesEditable(context, event);
     bool isTextWidgetInStack = false;
+    bool isOskTextField = false;
 
     if (kDebugMode) {
       final tappedWidgets = _getTappedWidgetTypes(context, event);
+      isOskTextField = tappedWidgets.contains('OskTextField');
       isTextWidgetInStack = tappedWidgets.any((w) =>
           w == 'TextFieldTapRegion' ||
           w == 'EditableText' ||
           w == 'TextField' ||
           w == 'TextFormField');
-      debugPrint('[OSK Guard] Tap detected - Hit-test editable: $isTextFieldTapped | Stack editable: $isTextWidgetInStack');
+      debugPrint('[OSK Guard] Tap detected - Hit-test editable: $isTextFieldTapped | Stack editable: $isTextWidgetInStack | OskTextField: $isOskTextField');
+    } else {
+      final tappedWidgets = _getTappedWidgetTypes(context, event);
+      isOskTextField = tappedWidgets.contains('OskTextField');
     }
 
-    final isTextField = isTextFieldTapped || isTextWidgetInStack;
+    final isTextField = isTextFieldTapped || isTextWidgetInStack || isOskTextField;
 
     if (isTextField) {
       if (Platform.isWindows) {
@@ -422,16 +450,19 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
         if (isTouch) {
           _lastTapWasTextField = true;
           TouchBridge.setOskOpenedByUs(true);
-          // Delay slightly to allow Flutter to focus the field first,
-          // then check if Windows already opened OSK; if not, open it ourselves.
-          Future.delayed(const Duration(milliseconds: 150), () {
+          // Delay 250ms after proper check (to settle animations/layout)
+          Future.delayed(const Duration(milliseconds: 250), () {
             if (mounted && _lastTapWasTextField) {
-              final isAlreadyVisible = OskWindowMonitor.isKeyboardWindowVisible();
-              if (!isAlreadyVisible) {
-                debugPrint('[OSK Guard] Windows did NOT auto-open OSK — opening via COM Toggle.');
-                TouchBridge.setKeyboardVisible(true);
+              if (!GlobalTouchKeyboardGuard.isOskLocked) {
+                final isAlreadyVisible = OskWindowMonitor.isKeyboardWindowVisible();
+                if (!isAlreadyVisible) {
+                  debugPrint('[OSK Guard] Windows did NOT auto-open OSK — opening via COM Toggle (250ms post-check).');
+                  TouchBridge.setKeyboardVisible(true);
+                } else {
+                  debugPrint('[OSK Guard] Windows already opened OSK — no action needed.');
+                }
               } else {
-                debugPrint('[OSK Guard] Windows already opened OSK — no action needed.');
+                debugPrint('[OSK Guard] OSK open blocked because navigation/action lock is active.');
               }
             }
           });
@@ -478,25 +509,98 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
 
 /// Suppresses the Windows touch keyboard during Navigator page transitions.
 class KeyboardSuppressingNavigatorObserver extends NavigatorObserver {
-  void _suppress() {
+  void _suppress(Route<dynamic> route) {
     FocusManager.instance.primaryFocus?.unfocus();
     if (Platform.isWindows) {
       GlobalTouchKeyboardGuard.globalKey.currentState?.forceSuppressKeyboard();
+      GlobalTouchKeyboardGuard.setNavigationLock(true);
+
+      // Listen to transition completion to release lock + 500ms cooldown
+      if (route is TransitionRoute) {
+        route.completed.then((_) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            GlobalTouchKeyboardGuard.setNavigationLock(false);
+          });
+        }).catchError((_) {
+          GlobalTouchKeyboardGuard.setNavigationLock(false);
+        });
+      } else {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          GlobalTouchKeyboardGuard.setNavigationLock(false);
+        });
+      }
     }
   }
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) _suppress();
+    if (route is PageRoute) _suppress(route);
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PageRoute) _suppress();
+    if (route is PageRoute) _suppress(route);
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    if (newRoute is PageRoute) _suppress();
+    if (newRoute is PageRoute) _suppress(newRoute);
+  }
+}
+
+/// A widget wrapper to mark and tag text fields for OSK summon checks.
+class OskTextField extends StatelessWidget {
+  const OskTextField({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return child;
+  }
+}
+
+/// A button wrapper that automatically clears focus, closes the keyboard,
+/// and suppresses keyboard popups during action execution + 500ms cooldown.
+class OskActionButton extends StatelessWidget {
+  const OskActionButton({
+    super.key,
+    required this.onPressed,
+    required this.child,
+    this.style,
+  });
+
+  final VoidCallback? onPressed;
+  final Widget child;
+  final ButtonStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      style: style,
+      onPressed: onPressed == null
+          ? null
+          : () async {
+              // 1. Preemptively clear focus & close keyboard
+              FocusManager.instance.primaryFocus?.unfocus();
+              TouchBridge.setKeyboardVisible(false);
+
+              // 2. Lock OSK
+              GlobalTouchKeyboardGuard.setActionButtonLock(true);
+
+              try {
+                // 3. Execute action dynamically to support async futures
+                final dynamic result = (onPressed as dynamic)();
+                if (result is Future) {
+                  await result;
+                }
+              } finally {
+                // 4. Enforce 500ms cooldown post-action
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  GlobalTouchKeyboardGuard.setActionButtonLock(false);
+                });
+              }
+            },
+      child: child,
+    );
   }
 }
