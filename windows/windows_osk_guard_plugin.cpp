@@ -301,20 +301,29 @@ extern "C" __declspec(dllexport) void SetTouchKeyboardVisible(bool visible) {
   if (visible) {
     EnsureTabTipHealthy(); // no-op if alive, launches TabTip if dead
   }
+
+  static ULONGLONG last_toggle = 0;
+  ULONGLONG now = GetTickCount64();
+  
   bool current = IsKeyboardVisible();
-  if (visible) {
-    g_osk_open_by_us = true;
-    if (!current) {
-      InvokeTipToggle();
-    }
-  } else {
-    g_osk_open_by_us = false;
-    // Hide keyboard gracefully using ITipInvocation::Toggle if it is currently visible.
-    // Avoid sending SC_CLOSE as it can crash the TabletInputService system-wide.
-    if (current) {
-      InvokeTipToggle();
-    }
+
+  // If we are within the 300ms cooldown, strictly ignore any toggle attempts
+  // to let the OS keyboard settle and prevent race/jitter/flickering.
+  if (now - last_toggle < 300) {
+    return;
   }
+
+  // If the current physical state already matches the desired state, do nothing.
+  if (visible == current) {
+    g_osk_open_by_us = visible;
+    return;
+  }
+
+  // Desired state differs from physical state, and cooldown has passed.
+  // Toggle the keyboard.
+  last_toggle = now;
+  g_osk_open_by_us = visible;
+  InvokeTipToggle();
 }
 
 extern "C" __declspec(dllexport) void SetTouchToMouseEnabled(bool enabled) {

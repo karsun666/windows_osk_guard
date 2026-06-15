@@ -292,11 +292,13 @@ class GlobalTouchKeyboardGuard extends StatefulWidget {
   static void setNavigationLock(bool locked) {
     _suppressForNavigation = locked;
     debugPrint('[OSK Guard] Navigation lock set to: $locked');
+    globalKey.currentState?._updateLockState();
   }
 
   static void setActionButtonLock(bool locked) {
     _suppressForAction = locked;
     debugPrint('[OSK Guard] Action button lock set to: $locked');
+    globalKey.currentState?._updateLockState();
   }
 
   @override
@@ -306,6 +308,28 @@ class GlobalTouchKeyboardGuard extends StatefulWidget {
 class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
   late final OskWindowMonitor _oskMonitor;
   bool _lastTapWasTextField = false;
+
+  void _updateLockState() {
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
+  }
+
+  static void checkPostOperationVisibility(String source) {
+    Future.delayed(const Duration(milliseconds: 150), () {
+      final isStillVisible = OskWindowMonitor.isKeyboardWindowVisible();
+      debugPrint('🔍 [OSK POST-CHECK] Source: $source | Keyboard visible post-operation: $isStillVisible');
+      if (isStillVisible) {
+        final primary = FocusManager.instance.primaryFocus;
+        final isTextFocused = primary != null && _focusIsEditable(primary);
+        debugPrint('🔍 [OSK POST-CHECK] Keyboard is visible! Focus in Text Field: $isTextFocused');
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -325,6 +349,7 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
           if (!isTextFocused || GlobalTouchKeyboardGuard.isOskLocked) {
             debugPrint('👉 [OSK MONITOR] Suppressing unexpected keyboard window appearance because focus is not in editable field or lock is active.');
             TouchBridge.setKeyboardVisible(false);
+            checkPostOperationVisibility('Monitor Suppression');
           }
         }
       },
@@ -358,6 +383,7 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
     if (Platform.isWindows) {
       _lastTapWasTextField = false;
       TouchBridge.setKeyboardVisible(false);
+      checkPostOperationVisibility('Force Suppress');
     }
   }
 
@@ -414,7 +440,9 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
         } catch (_) {}
       }
     }
-    return types.toList();
+    final list = types.toList();
+    debugPrint('[OSK Guard] Tapped widget types: $list');
+    return list;
   }
 
   void _onPointerDown(BuildContext context, PointerDownEvent event) {
@@ -489,9 +517,11 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
       _lastTapWasTextField = false;
       TouchBridge.setOskOpenedByUs(false);
       TouchBridge.setKeyboardVisible(false);
+      checkPostOperationVisibility('PointerDown Immediate Hide');
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted && !_lastTapWasTextField) {
           TouchBridge.setKeyboardVisible(false);
+          checkPostOperationVisibility('PointerDown Delayed Hide');
         }
       });
     }
@@ -499,10 +529,14 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
 
   @override
   Widget build(BuildContext context) {
+    final locked = GlobalTouchKeyboardGuard.isOskLocked;
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: (e) => _onPointerDown(context, e),
-      child: widget.child,
+      child: AbsorbPointer(
+        absorbing: locked,
+        child: widget.child,
+      ),
     );
   }
 }
@@ -583,9 +617,13 @@ class OskActionButton extends StatelessWidget {
               // 1. Preemptively clear focus & close keyboard
               FocusManager.instance.primaryFocus?.unfocus();
               TouchBridge.setKeyboardVisible(false);
+              GlobalTouchKeyboardGuardState.checkPostOperationVisibility('OskActionButton');
 
-              // 2. Lock OSK
+              // 2. Lock OSK immediately
               GlobalTouchKeyboardGuard.setActionButtonLock(true);
+
+              // Wait 80ms for focus clearing and close command to settle
+              await Future<void>.delayed(const Duration(milliseconds: 80));
 
               try {
                 // 3. Execute action dynamically to support async futures
