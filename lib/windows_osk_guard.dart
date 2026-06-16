@@ -643,3 +643,70 @@ class OskActionButton extends StatelessWidget {
     );
   }
 }
+
+/// A navigator helper to proactively manage OSK (unfocus -> suppress -> settle -> navigate).
+class OskNavigator {
+  OskNavigator._();
+
+  /// Unfocuses any active text field, closes the keyboard, and waits for settleDelayMs before executing push.
+  static Future<T?> push<T extends Object?>(
+    BuildContext context,
+    Route<T> route, {
+    int settleDelayMs = 120,
+  }) async {
+    // 1. Unfocus focus node
+    FocusManager.instance.primaryFocus?.unfocus();
+    
+    if (Platform.isWindows) {
+      // 2. Hide OSK immediately
+      TouchBridge.setKeyboardVisible(false);
+      GlobalTouchKeyboardGuard.setNavigationLock(true);
+      GlobalTouchKeyboardGuardState.checkPostOperationVisibility('OskNavigator.push');
+      
+      // 3. Settle Win32 message queue and hide animations
+      await Future<void>.delayed(Duration(milliseconds: settleDelayMs));
+    }
+    
+    // 4. Navigate
+    return Navigator.push<T>(context, route);
+  }
+
+  /// Unfocuses any active text field, closes the keyboard, and waits for settleDelayMs before executing pop.
+  static Future<void> pop<T extends Object?>(
+    BuildContext context, [
+    T? result,
+    int settleDelayMs = 120,
+  ]) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    
+    if (Platform.isWindows) {
+      TouchBridge.setKeyboardVisible(false);
+      GlobalTouchKeyboardGuard.setNavigationLock(true);
+      GlobalTouchKeyboardGuardState.checkPostOperationVisibility('OskNavigator.pop');
+      
+      await Future<void>.delayed(Duration(milliseconds: settleDelayMs));
+    }
+    
+    Navigator.pop<T>(context, result);
+  }
+
+  /// Unfocuses any active text field, closes the keyboard, and waits for settleDelayMs before executing pushReplacement.
+  static Future<TOsk?> pushReplacement<TOsk extends Object?, TOskAlt extends Object?>(
+    BuildContext context,
+    Route<TOsk> newRoute, {
+    TOskAlt? result,
+    int settleDelayMs = 120,
+  }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    
+    if (Platform.isWindows) {
+      TouchBridge.setKeyboardVisible(false);
+      GlobalTouchKeyboardGuard.setNavigationLock(true);
+      GlobalTouchKeyboardGuardState.checkPostOperationVisibility('OskNavigator.pushReplacement');
+      
+      await Future<void>.delayed(Duration(milliseconds: settleDelayMs));
+    }
+    
+    return Navigator.pushReplacement<TOsk, TOskAlt>(context, newRoute, result: result);
+  }
+}

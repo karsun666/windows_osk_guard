@@ -772,7 +772,7 @@ class _TestDashboardPageState extends State<TestDashboardPage> {
                                         OskActionButton(
                                           onPressed: () {
                                             _log('BUTTON PRESS: Navigate to Page 2');
-                                            Navigator.push(
+                                            OskNavigator.push(
                                               context,
                                               MaterialPageRoute(builder: (context) => const SecondPage()),
                                             );
@@ -1052,7 +1052,7 @@ class SecondPage extends StatelessWidget {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                Navigator.pop(context);
+                OskNavigator.pop(context);
               },
               child: const Text('Go Back'),
             ),
