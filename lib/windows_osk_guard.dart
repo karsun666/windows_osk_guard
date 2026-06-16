@@ -345,9 +345,13 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
         if (Platform.isWindows) {
           final primary = FocusManager.instance.primaryFocus;
           final isTextFocused = primary != null && _focusIsEditable(primary);
-          debugPrint('⌨️ [OSK MONITOR] Keyboard appeared. Focus is in Text Field: $isTextFocused | Lock: ${GlobalTouchKeyboardGuard.isOskLocked}');
-          if (!isTextFocused || GlobalTouchKeyboardGuard.isOskLocked) {
-            debugPrint('👉 [OSK MONITOR] Suppressing unexpected keyboard window appearance because focus is not in editable field or lock is active.');
+          final isSlate = TouchBridge.isSlateMode();
+          debugPrint('⌨️ [OSK MONITOR] Keyboard appeared. Focus in Text Field: $isTextFocused | Lock: ${GlobalTouchKeyboardGuard.isOskLocked} | Slate Mode: $isSlate');
+          
+          // Suppress the keyboard if navigation/action lock is active, OR if focus is not in a text field,
+          // OR if the device is in Laptop Mode (where a physical keyboard is available).
+          if (!isTextFocused || GlobalTouchKeyboardGuard.isOskLocked || !isSlate) {
+            debugPrint('👉 [OSK MONITOR] Suppressing keyboard window appearance (Reason: focus-free/lock/laptop-mode).');
             TouchBridge.setKeyboardVisible(false);
             checkPostOperationVisibility('Monitor Suppression');
           }
@@ -482,12 +486,18 @@ class GlobalTouchKeyboardGuardState extends State<GlobalTouchKeyboardGuard> {
           Future.delayed(const Duration(milliseconds: 250), () {
             if (mounted && _lastTapWasTextField) {
               if (!GlobalTouchKeyboardGuard.isOskLocked) {
-                final isAlreadyVisible = OskWindowMonitor.isKeyboardWindowVisible();
-                if (!isAlreadyVisible) {
-                  debugPrint('[OSK Guard] Windows did NOT auto-open OSK — opening via COM Toggle (250ms post-check).');
-                  TouchBridge.setKeyboardVisible(true);
+                // Only force-open if the device is in Slate/Tablet Mode.
+                // In Laptop Mode, we want the keyboard to remain closed.
+                if (TouchBridge.isSlateMode()) {
+                  final isAlreadyVisible = OskWindowMonitor.isKeyboardWindowVisible();
+                  if (!isAlreadyVisible) {
+                    debugPrint('[OSK Guard] Windows did NOT auto-open OSK — opening via COM Toggle (250ms post-check).');
+                    TouchBridge.setKeyboardVisible(true);
+                  } else {
+                    debugPrint('[OSK Guard] Windows already opened OSK — no action needed.');
+                  }
                 } else {
-                  debugPrint('[OSK Guard] Windows already opened OSK — no action needed.');
+                  debugPrint('[OSK Guard] Force-opening OSK bypassed because device is in Laptop Mode.');
                 }
               } else {
                 debugPrint('[OSK Guard] OSK open blocked because navigation/action lock is active.');
