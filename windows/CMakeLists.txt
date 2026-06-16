@@ -4,6 +4,9 @@
 # customers of the plugin.
 cmake_minimum_required(VERSION 3.14)
 
+set(CMAKE_POLICY_VERSION_MINIMUM "3.5")
+
+
 # Project-level configuration.
 set(PROJECT_NAME "windows_osk_guard")
 project(${PROJECT_NAME} LANGUAGES CXX)
